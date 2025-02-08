@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import logging
 from fastapi.responses import JSONResponse
+import requests  # for making HTTP requests
 
 from schemas.package import PackageCheck
 from schemas.security import SecurityScanResult
@@ -73,10 +74,11 @@ async def check_package(package: PackageCheck):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/scan-code")
-async def scan_code(code: str):
-    """
-    Scan code snippet for potential security issues
-    """
+async def scan_code(request: Request):
+    body = await request.json()
+    code = body.get("code")
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
     try:
         result = await code_scanner.scan_code(code)
         return result
@@ -90,6 +92,18 @@ async def check_api_url(url: str):
     """
     try:
         result = await api_scanner.check_url(url)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/scan-webpage")
+async def scan_webpage(request: Request):
+    body = await request.json()
+    url = body.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    try:
+        result = await code_scanner.scan_webpage(url)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
