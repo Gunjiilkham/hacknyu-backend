@@ -44,12 +44,33 @@ class APIScanner:
                 warnings.append(f"Timeout checking domain similarity for {api} API")
                 risk_level = "medium"
         
+        # Example 3: Someone using fake Google API
+        # api-g00gle.com instead of api.google.com
+        
+        # Without SSL:
+        # Attacker could intercept and say "api-g00gle.com is Google's real API!"
+        
+        # With SSL:
+        if self._is_suspicious_domain(url):
+            warnings.append("This might be a phishing attempt!")
+            risk_level = "high"
+        
         return SecurityScanResult(
             is_suspicious=len(warnings) > 0,
             risk_level=risk_level,
             warnings=warnings,
             details={"url": url, "domain": domain}
         )
+
+    async def _similar_domain(self, domain1: str, domain2: str) -> bool:
+        # Make method async since it's called with await
+        ratio = SequenceMatcher(None, domain1.lower(), domain2.lower()).ratio()
+        return ratio > 0.8 
+
+    def _is_suspicious_domain(self, url: str) -> bool:
+        # Implementation of _is_suspicious_domain method
+        # This is a placeholder and should be implemented based on your specific requirements
+        return False  # Placeholder return, actual implementation needed
 
     async def _similar_domain(self, domain1: str, domain2: str) -> bool:
         # Make method async since it's called with await
