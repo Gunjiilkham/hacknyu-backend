@@ -43,6 +43,8 @@ class SecurityRater:
         )
 
     def _score_to_risk_level(self, score: int) -> RiskLevel:
+        if score < 0:
+            raise ValueError("Score cannot be negative")
         if score < 20:
             return RiskLevel.SAFE
         elif score < 40:
