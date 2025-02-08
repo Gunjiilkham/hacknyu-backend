@@ -17,6 +17,10 @@ class SecurityRating(BaseModel):
 class SecurityScanResult(BaseModel):
     is_suspicious: bool
     risk_level: RiskLevel
-    rating: SecurityRating
     warnings: List[str]
-    details: Optional[Dict] = None
+    details: Dict = {}  # Provide default empty dict
+
+    # SSL helps ensure:
+    # 1. Package data is authentic
+    # 2. Security checks aren't tampered with
+    # 3. Results aren't modified in transit
