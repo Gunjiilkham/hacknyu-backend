@@ -1,15 +1,22 @@
 import ast
 from typing import List, Dict
-from schemas.security import SecurityScanResult
+from schemas.security import SecurityScanResult, SecurityRating, RiskLevel
+from utils.constants import SUSPICIOUS_FUNCTIONS
 
 class CodeScanner:
     def __init__(self):
-        self.suspicious_functions = {
-            'eval', 'exec', 'os.system', 'subprocess.run', 
-            'subprocess.Popen', 'requests.get', 'urllib.request.urlopen'
-        }
+        self.suspicious_functions = SUSPICIOUS_FUNCTIONS  # Use constants
 
     async def scan_code(self, code: str) -> SecurityScanResult:
+        if not code.strip():  # Add validation for empty code
+            return SecurityScanResult(
+                is_suspicious=False,
+                risk_level=RiskLevel.SAFE,
+                rating=SecurityRating(score=0, risk_level=RiskLevel.SAFE, confidence=100),
+                warnings=[],
+                details={"code_length": 0}
+            )
+
         warnings = []
         risk_level = "low"
 
