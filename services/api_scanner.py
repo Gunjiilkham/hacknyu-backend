@@ -1,23 +1,32 @@
 from urllib.parse import urlparse
 import aiohttp
-from schemas.security import SecurityScanResult
+from schemas.security import SecurityScanResult, SecurityRating, RiskLevel
+from utils.constants import KNOWN_APIS
+import asyncio
+from difflib import SequenceMatcher
 
 class APIScanner:
     def __init__(self):
-        self.known_apis = {
-            "google": ["googleapis.com", "google.com"],
-            "github": ["api.github.com", "github.com"],
-            "aws": ["amazonaws.com"],
-            "azure": ["azure.com", "microsoftonline.com"]
-        }
+        self.known_apis = KNOWN_APIS  # Use constants
 
     async def check_url(self, url: str) -> SecurityScanResult:
         warnings = []
         risk_level = "low"
         
         # Parse URL
-        parsed = urlparse(url)
-        domain = parsed.netloc
+        try:
+            parsed = urlparse(url)
+            if not parsed.netloc:  # Add validation for empty domain
+                raise ValueError("Invalid URL: no domain found")
+            domain = parsed.netloc
+        except ValueError as e:
+            return SecurityScanResult(
+                is_suspicious=True,
+                risk_level=RiskLevel.HIGH,
+                rating=SecurityRating(score=80, risk_level=RiskLevel.HIGH, confidence=100),
+                warnings=[f"Invalid URL: {str(e)}"],
+                details={"url": url}
+            )
         
         # Check for HTTP (non-HTTPS)
         if parsed.scheme != "https":
@@ -26,10 +35,14 @@ class APIScanner:
         
         # Check for typosquatting of known APIs
         for api, domains in self.known_apis.items():
-            if any(self._similar_domain(domain, known) for known in domains):
-                if domain not in domains:
-                    warnings.append(f"Domain looks similar to official {api} API")
-                    risk_level = "high"
+            try:
+                if any(await asyncio.wait_for(self._similar_domain(domain, known), timeout=5) for known in domains):
+                    if domain not in domains:
+                        warnings.append(f"Domain looks similar to official {api} API")
+                        risk_level = "high"
+            except asyncio.TimeoutError:
+                warnings.append(f"Timeout checking domain similarity for {api} API")
+                risk_level = "medium"
         
         return SecurityScanResult(
             is_suspicious=len(warnings) > 0,
@@ -38,7 +51,7 @@ class APIScanner:
             details={"url": url, "domain": domain}
         )
 
-    def _similar_domain(self, domain1: str, domain2: str) -> bool:
-        # Simple Levenshtein distance check
-        from difflib import SequenceMatcher
-        return SequenceMatcher(None, domain1, domain2).ratio() > 0.8 
+    async def _similar_domain(self, domain1: str, domain2: str) -> bool:
+        # Make method async since it's called with await
+        ratio = SequenceMatcher(None, domain1.lower(), domain2.lower()).ratio()
+        return ratio > 0.8 
