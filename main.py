@@ -1,12 +1,18 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
+import logging
+from fastapi.responses import JSONResponse
 
 from schemas.package import PackageCheck
 from schemas.security import SecurityScanResult
 from services.package_scanner import PackageScanner
 from services.code_scanner import CodeScanner
 from services.api_scanner import APIScanner
+
+# Add logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Silent Guardian API",
@@ -22,6 +28,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add error handling middleware
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        logger.error(f"Unhandled error: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"}
+        )
 
 # Initialize services
 package_scanner = PackageScanner()
@@ -42,9 +60,7 @@ async def root():
 
 @app.post("/api/v1/check-package", response_model=SecurityScanResult)
 async def check_package(package: PackageCheck):
-    """
-    Check a package for potential security issues
-    """
+    logger.info(f"Checking package: {package.name} ({package.ecosystem})")
     try:
         result = await package_scanner.scan_package(
             name=package.name,
@@ -53,6 +69,7 @@ async def check_package(package: PackageCheck):
         )
         return result
     except Exception as e:
+        logger.error(f"Error checking package: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/scan-code")
