@@ -1,2 +1,9 @@
 fastapi==0.68.0
 uvicorn==0.15.0
+requests==2.26.0
+python-multipart==0.0.5
+pydantic==1.8.2
+aiohttp==3.8.1  # For async HTTP requests
+beautifulsoup4==4.9.3  # For parsing HTML
+python-jose[cryptography]==3.3.0  # For JWT tokens
+passlib[bcrypt]==1.7.4  # For password hashing
