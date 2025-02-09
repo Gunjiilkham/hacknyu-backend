@@ -10,6 +10,7 @@ from schemas.security import SecurityScanResult
 from services.package_scanner import PackageScanner
 from services.code_scanner import CodeScanner
 from services.api_scanner import APIScanner
+from services.keyword_scanner import KeywordScanner
 
 # Add logging
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +25,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],  # Allows requests from frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,6 +47,7 @@ async def catch_exceptions_middleware(request: Request, call_next):
 package_scanner = PackageScanner()
 code_scanner = CodeScanner()
 api_scanner = APIScanner()
+keyword_scanner = KeywordScanner()
 
 @app.get("/")
 async def root():
@@ -55,7 +57,8 @@ async def root():
         "endpoints": {
             "package_check": "/api/v1/check-package",
             "code_scan": "/api/v1/scan-code",
-            "api_check": "/api/v1/check-api-url"
+            "api_check": "/api/v1/check-api-url",
+            "scan_keywords": "/api/v1/scan-keywords"
         }
     }
 
@@ -104,6 +107,82 @@ async def scan_webpage(request: Request):
         raise HTTPException(status_code=400, detail="URL is required")
     try:
         result = await code_scanner.scan_webpage(url)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/extension/scan")
+async def scan_for_extension(request: Request):
+    """Endpoint for browser extension to scan current webpage"""
+    data = await request.json()
+    url = data.get("url")
+    page_content = data.get("content")  # HTML content from current page
+    scripts = data.get("scripts", [])   # All scripts from the page
+
+    try:
+        code_scanner = CodeScanner()
+        keyword_scanner = KeywordScanner()  # Add keyword scanner
+        
+        warnings = []
+        suspicious_elements = []
+
+        # 1. Check domain safety
+        if code_scanner._is_suspicious_domain(url):
+            warnings.append({
+                "type": "domain",
+                "level": "high",
+                "message": "⚠️ This might be a phishing website",
+                "similar_to": code_scanner._find_similar_domain(url)
+            })
+
+        # 2. Scan all scripts on the page
+        for script in scripts:
+            result = await code_scanner.analyze_code(script)
+            if result.is_suspicious:
+                suspicious_elements.append({
+                    "type": "script",
+                    "warnings": result.warnings,
+                    "risk_level": result.risk_level
+                })
+
+        # 3. NEW: Scan page content for sensitive keywords
+        if page_content:
+            keyword_result = await keyword_scanner.scan_text(page_content)
+            if keyword_result.is_suspicious:
+                suspicious_elements.append({
+                    "type": "content",
+                    "warnings": keyword_result.warnings,
+                    "risk_level": keyword_result.risk_level,
+                    "details": keyword_result.details
+                })
+
+        # 4. Overall risk assessment
+        risk_level = "safe"
+        if warnings or suspicious_elements:
+            risk_level = "high" if any(w["level"] == "high" for w in warnings) else "medium"
+
+        return {
+            "is_suspicious": bool(warnings or suspicious_elements),
+            "risk_level": risk_level,
+            "warnings": warnings,
+            "suspicious_elements": suspicious_elements,
+            "safe_to_proceed": risk_level == "safe"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/scan-keywords")
+async def scan_keywords(request: Request):
+    """Scan text for sensitive keywords"""
+    body = await request.json()
+    text = body.get("text")
+    
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+        
+    try:
+        result = await keyword_scanner.scan_text(text)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
