@@ -5,6 +5,7 @@ from utils.rating import SecurityRater
 from utils.constants import SUSPICIOUS_PATTERNS
 from datetime import datetime, timedelta
 import ssl
+from difflib import SequenceMatcher
 
 class PackageScanner:
     def __init__(self):
@@ -17,6 +18,16 @@ class PackageScanner:
         self.ssl_context = ssl.create_default_context()
         self.ssl_context.check_hostname = False
         self.ssl_context.verify_mode = ssl.CERT_NONE
+        self.common_packages = {
+            "pypi": [
+                "requests", "flask", "django", "numpy", "pandas",
+                "tensorflow", "pytorch", "scipy", "matplotlib"
+            ],
+            "npm": [
+                "react", "express", "lodash", "moment", "axios",
+                "vue", "angular", "jquery", "bootstrap"
+            ]
+        }
 
     async def scan_package(self, name: str, ecosystem: str, version: Optional[str] = None) -> SecurityScanResult:
         if ecosystem not in self.registry_urls:
@@ -83,20 +94,21 @@ class PackageScanner:
 
     async def _check_pypi_package(self, session: aiohttp.ClientSession, url: str, name: str, version: Optional[str]) -> SecurityScanResult:
         try:
-            # Add SSL=False to fix certificate issues
             async with session.get(f"{url}/{name}/json", ssl=False) as response:
                 if response.status == 404:
+                    # Find similar packages in PyPI
+                    similar_package = self._find_similar_package(name, "pypi")  # Pass ecosystem explicitly
                     return SecurityScanResult(
                         is_suspicious=True,
                         risk_level=RiskLevel.HIGH,
                         warnings=[
                             "⚠️ Package not found in PyPI registry",
-                            "This might be a typosquatting attempt"  # Added warning
+                            f"Similar to existing package: {similar_package}" if similar_package else "This might be a typosquatting attempt"
                         ],
                         details={
-                            "name": name, 
+                            "name": name,
                             "ecosystem": "pypi",
-                            "similar_to": self._find_similar_package(name)  # Add similar package info
+                            "similar_to": similar_package
                         }
                     )
                 
@@ -179,3 +191,16 @@ class PackageScanner:
             return (datetime.now(created.tzinfo) - created) < timedelta(days=30)
         except ValueError:
             return False  # If we can't parse the date, assume it's not new
+
+    def _find_similar_package(self, name: str, ecosystem: str) -> str:
+        """Find similar package names to detect typosquatting"""
+        if ecosystem not in self.common_packages:
+            return ""
+        
+        similar_packages = []
+        for pkg in self.common_packages[ecosystem]:
+            ratio = SequenceMatcher(None, name.lower(), pkg.lower()).ratio()
+            if ratio > 0.8:  # 80% similarity threshold
+                similar_packages.append(pkg)
+        
+        return similar_packages[0] if similar_packages else ""
