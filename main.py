@@ -4,6 +4,7 @@ from typing import List, Optional
 import logging
 from fastapi.responses import JSONResponse
 import requests  # for making HTTP requests
+from urllib.parse import urlparse
 
 from schemas.package import PackageCheck
 from schemas.security import SecurityScanResult
@@ -113,60 +114,142 @@ async def scan_webpage(request: Request):
 
 @app.post("/api/v1/extension/scan")
 async def scan_for_extension(request: Request):
-    """Endpoint for browser extension to scan current webpage"""
     data = await request.json()
     url = data.get("url")
-    page_content = data.get("content")  # HTML content from current page
-    scripts = data.get("scripts", [])   # All scripts from the page
+    page_content = data.get("content")
+    scripts = data.get("scripts", [])
 
     try:
-        code_scanner = CodeScanner()
-        keyword_scanner = KeywordScanner()  # Add keyword scanner
-        
+        trust_points = 100
         warnings = []
-        suspicious_elements = []
+        risk_factors = []
 
-        # 1. Check domain safety
-        if code_scanner._is_suspicious_domain(url):
-            warnings.append({
-                "type": "domain",
-                "level": "high",
-                "message": "⚠️ This might be a phishing website",
-                "similar_to": code_scanner._find_similar_domain(url)
-            })
+        # Dangerous patterns (-20 points each)
+        dangerous_patterns = {
+            # Code Execution
+            'eval(': 'Dynamic code execution',
+            'new Function(': 'Dynamic code execution',
+            'setTimeout(': 'Dynamic code execution',
+            'setInterval(': 'Dynamic code execution',
+            
+            # Unsafe DOM
+            'document.write(': 'Unsafe DOM manipulation',
+            '.innerHTML = ': 'Unsafe HTML injection',
+            
+            # Credentials
+            'api_key': 'Exposed credentials',
+            'apikey': 'Exposed credentials',
+            'secret_key': 'Exposed credentials',
+            'password': 'Exposed credentials',
+            'Bearer ': 'Exposed token',
+            
+            # Malicious
+            'crypto.miner': 'Cryptocurrency mining',
+            'coinhive': 'Cryptocurrency mining',
+            'base64_decode(': 'Obfuscated code',
+            'fromCharCode(': 'Obfuscated code',
+            
+            # Dangerous redirects
+            'window.location = ': 'Forced redirect',
+            'window.open(': 'Popup window',
+            
+            # Data exfiltration
+            'navigator.sendBeacon(': 'Data sending',
+            'websocket(': 'WebSocket connection'
+        }
 
-        # 2. Scan all scripts on the page
+        # Suspicious patterns (-10 points each)
+        suspicious_patterns = {
+            # Storage
+            'localStorage': 'Local storage usage',
+            'sessionStorage': 'Session storage usage',
+            'indexedDB': 'Database usage',
+            
+            # Network
+            'fetch(': 'Network request',
+            'xhr.open': 'Network request',
+            'websocket': 'WebSocket usage',
+            
+            # Cookies
+            'document.cookie': 'Cookie manipulation',
+            
+            # Forms
+            'form.submit': 'Form submission',
+            'formData': 'Form data handling',
+            
+            # Navigation
+            'history.pushState': 'History manipulation',
+            'history.replaceState': 'History manipulation'
+        }
+
+        # Safe patterns (no deduction)
+        safe_patterns = {
+            # Standard DOM
+            'getElementById',
+            'querySelector',
+            'addEventListener',
+            'removeEventListener',
+            
+            # Common frameworks
+            'React',
+            'Vue',
+            'Angular',
+            'jQuery',
+            
+            # Analytics
+            'gtag',
+            'ga',
+            'fbq',
+            'dataLayer',
+            
+            # Standard APIs
+            'fetch',
+            'console.log',
+            'Promise',
+            'async',
+            'await'
+        }
+
         for script in scripts:
-            result = await code_scanner.analyze_code(script)
-            if result.is_suspicious:
-                suspicious_elements.append({
-                    "type": "script",
-                    "warnings": result.warnings,
-                    "risk_level": result.risk_level
-                })
+            # Check for dangerous patterns
+            for pattern, reason in dangerous_patterns.items():
+                if pattern in script:
+                    trust_points -= 20
+                    warnings.append(f"⚠️ Dangerous: {reason}")
+                    risk_factors.append(f"dangerous_{pattern}")
 
-        # 3. NEW: Scan page content for sensitive keywords
+            # Check for suspicious patterns
+            for pattern, reason in suspicious_patterns.items():
+                if pattern in script and not any(safe in script for safe in safe_patterns):
+                    trust_points -= 10
+                    warnings.append(f"⚕️ Suspicious: {reason}")
+                    risk_factors.append(f"suspicious_{pattern}")
+
+        # Domain checks
+        if not url.startswith('https://'):
+            trust_points -= 15
+            warnings.append("⚠️ Insecure connection (no HTTPS)")
+
+        # Content checks
         if page_content:
-            keyword_result = await keyword_scanner.scan_text(page_content)
-            if keyword_result.is_suspicious:
-                suspicious_elements.append({
-                    "type": "content",
-                    "warnings": keyword_result.warnings,
-                    "risk_level": keyword_result.risk_level,
-                    "details": keyword_result.details
-                })
+            if '<iframe' in page_content:
+                trust_points -= 10
+                warnings.append("⚠️ Contains iframes")
+            if 'phishing' in page_content.lower():
+                trust_points -= 30
+                warnings.append("⚠️ Potential phishing content")
 
-        # 4. Overall risk assessment
-        risk_level = "safe"
-        if warnings or suspicious_elements:
-            risk_level = "high" if any(w["level"] == "high" for w in warnings) else "medium"
+        # Final calculations
+        trust_points = max(0, min(100, trust_points))
 
         return {
-            "is_suspicious": bool(warnings or suspicious_elements),
-            "risk_level": risk_level,
-            "warnings": warnings,
-            "suspicious_elements": suspicious_elements,
-            "safe_to_proceed": risk_level == "safe"
+            "trustScore": trust_points,
+            "alerts": warnings,
+            "isSuspicious": trust_points < 60,
+            "details": {
+                "risk_level": "safe" if trust_points >= 80 else "medium" if trust_points >= 60 else "high",
+                "risk_factors": risk_factors
+            }
         }
 
     except Exception as e:
