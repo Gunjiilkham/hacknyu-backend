@@ -5,7 +5,7 @@ class KeywordScanner:
     def __init__(self):
         # Keywords to scan for, with their risk levels
         self.suspicious_keywords = {
-            # High risk keywords
+            # High risk keywords only
             'password': RiskLevel.HIGH,
             'credit_card': RiskLevel.HIGH,
             'ssn': RiskLevel.HIGH,
@@ -24,9 +24,75 @@ class KeywordScanner:
             'account': RiskLevel.LOW,
             'email': RiskLevel.LOW
         }
+        
+        # Documentation/safe contexts
+        self.safe_contexts = [
+            # Documentation indicators
+            'documentation', 'docs', 'reference',
+            'example', 'tutorial', 'guide',
+            'learn', 'getting-started', 'quickstart',
+            
+            # API/SDK paths
+            'what-is', 'how-to', 'api-reference',
+            'sdk', 'developer', 'development',
+            
+            # Common doc sections
+            'overview', 'introduction', 'concepts',
+            'best-practices', 'faq', 'troubleshooting',
+            
+            # Learning paths
+            'learn', 'training', 'workshop',
+            'course', 'lesson', 'module'
+        ]
+
+        # Safe domains that are documentation-focused
+        self.doc_domains = [
+            # Cloud Documentation
+            'docs.aws.amazon.com',
+            'aws.amazon.com/what-is',
+            'docs.microsoft.com',
+            'learn.microsoft.com',
+            'cloud.google.com/docs',
+            
+            # Programming Languages
+            'docs.python.org',
+            'devdocs.io',
+            'go.dev/doc',
+            'docs.oracle.com/en/java',
+            'php.net/docs.php',
+            
+            # Web Development
+            'developer.mozilla.org',
+            'w3schools.com',
+            'reactjs.org/docs',
+            'vuejs.org/guide',
+            'angular.io/docs',
+            
+            # Development Platforms
+            'docs.github.com',
+            'gitlab.com/help',
+            'docs.docker.com',
+            'kubernetes.io/docs'
+        ]
+
+        # Documentation file patterns
+        self.doc_patterns = [
+            'readme', 'changelog', 'contributing',
+            'documentation', 'docs', 'wiki',
+            'manual', 'guide', 'tutorial'
+        ]
 
     async def scan_text(self, text: str) -> SecurityScanResult:
-        """Scan text for suspicious keywords"""
+        # If it's documentation, return safe immediately
+        text_lower = text.lower()
+        if any(context in text_lower for context in self.safe_contexts):
+            return SecurityScanResult(
+                is_suspicious=False,
+                risk_level=RiskLevel.SAFE,
+                warnings=[],
+                details={'context': 'documentation'}
+            )
+        
         found_keywords = []
         highest_risk = RiskLevel.SAFE
 
