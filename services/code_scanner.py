@@ -5,10 +5,19 @@ from typing import List, Dict, Optional
 from schemas.security import SecurityScanResult, SecurityRating, RiskLevel
 from utils.constants import SUSPICIOUS_FUNCTIONS
 import ssl
+from urllib.parse import urlparse
+from difflib import SequenceMatcher
 
 class CodeScanner:
     def __init__(self):
         self.suspicious_functions = SUSPICIOUS_FUNCTIONS
+        self.trusted_domains = {
+            "python.org": "Python",
+            "pypi.org": "PyPI",
+            "npmjs.com": "npm",
+            "github.com": "GitHub"
+        }
+        self.suspicious_tlds = ['.xyz', '.tk', '.pw', '.cc', '.su']
 
     async def analyze_code(self, code: str) -> SecurityScanResult:
         if not code.strip():  # Add validation for empty code
@@ -121,70 +130,78 @@ class CodeScanner:
                                 warnings=[f"⚠️ URL not found: {url}"],
                                 details={"url": url}
                             )
-                        html = await response.text()
 
-                        # Check for phishing domains
+                        # Check domain before fetching content
                         if self._is_suspicious_domain(url):
                             return SecurityScanResult(
                                 is_suspicious=True,
                                 risk_level=RiskLevel.HIGH,
-                                warnings=[f"⚠️ Suspicious domain: {url}"],
-                                details={"url": url, "type": "phishing"}
+                                warnings=[
+                                    f"⚠️ Suspicious domain detected",
+                                    "This might be a phishing attempt"
+                                ],
+                                details={
+                                    "url": url,
+                                    "type": "phishing",
+                                    "similar_to": self._find_similar_domain(url)
+                                }
                             )
 
+                    html = await response.text()
+
+                    # Parse HTML
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # Find all code elements
+                    suspicious_elements = []
+                    
+                    # Check <script> tags
+                    for script in soup.find_all('script'):
+                        if script.string:  # If script has content
+                            result = await self.analyze_code(script.string)
+                            if result.is_suspicious:
+                                suspicious_elements.append({
+                                    'type': 'script',
+                                    'content': script.string,
+                                    'warnings': result.warnings
+                                })
+
+                    # Check inline event handlers
+                    for tag in soup.find_all(lambda t: any(attr.startswith('on') for attr in t.attrs)):
+                        for attr, value in tag.attrs.items():
+                            if attr.startswith('on'):  # onclick, onload, etc.
+                                result = await self.analyze_code(value)
+                                if result.is_suspicious:
+                                    suspicious_elements.append({
+                                        'type': 'event_handler',
+                                        'content': value,
+                                        'warnings': result.warnings
+                                    })
+
+                    return SecurityScanResult(
+                        is_suspicious=len(suspicious_elements) > 0,
+                        risk_level=RiskLevel.HIGH if suspicious_elements else RiskLevel.SAFE,
+                        rating=SecurityRating(
+                            score=80 if suspicious_elements else 0,
+                            risk_level=RiskLevel.HIGH if suspicious_elements else RiskLevel.SAFE,
+                            confidence=90
+                        ),
+                        warnings=[f"Suspicious {elem['type']}: {', '.join(elem['warnings'])}" 
+                                 for elem in suspicious_elements],
+                        details={
+                            'url': url,
+                            'suspicious_elements': suspicious_elements
+                        }
+                    )
+                
                 except aiohttp.ClientError as e:
                     return SecurityScanResult(
                         is_suspicious=True,
                         risk_level=RiskLevel.HIGH,
-                        warnings=[f"Error accessing URL: {str(e)}"],
+                        warnings=[f"⚠️ Error accessing URL: {str(e)}"],
                         details={"url": url, "error": str(e)}
                     )
 
-            # Parse HTML
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            # Find all code elements
-            suspicious_elements = []
-            
-            # Check <script> tags
-            for script in soup.find_all('script'):
-                if script.string:  # If script has content
-                    result = await self.analyze_code(script.string)
-                    if result.is_suspicious:
-                        suspicious_elements.append({
-                            'type': 'script',
-                            'content': script.string,
-                            'warnings': result.warnings
-                        })
-
-            # Check inline event handlers
-            for tag in soup.find_all(lambda t: any(attr.startswith('on') for attr in t.attrs)):
-                for attr, value in tag.attrs.items():
-                    if attr.startswith('on'):  # onclick, onload, etc.
-                        result = await self.analyze_code(value)
-                        if result.is_suspicious:
-                            suspicious_elements.append({
-                                'type': 'event_handler',
-                                'content': value,
-                                'warnings': result.warnings
-                            })
-
-            return SecurityScanResult(
-                is_suspicious=len(suspicious_elements) > 0,
-                risk_level=RiskLevel.HIGH if suspicious_elements else RiskLevel.SAFE,
-                rating=SecurityRating(
-                    score=80 if suspicious_elements else 0,
-                    risk_level=RiskLevel.HIGH if suspicious_elements else RiskLevel.SAFE,
-                    confidence=90
-                ),
-                warnings=[f"Suspicious {elem['type']}: {', '.join(elem['warnings'])}" 
-                         for elem in suspicious_elements],
-                details={
-                    'url': url,
-                    'suspicious_elements': suspicious_elements
-                }
-            )
-                
         except Exception as e:
             return SecurityScanResult(
                 is_suspicious=True,
@@ -206,3 +223,38 @@ class CodeScanner:
             warnings=result.warnings,
             details=result.details or {}  # Provide default
         ) 
+
+    def _is_suspicious_domain(self, url: str) -> bool:
+        """Check if a domain looks suspicious"""
+        try:
+            domain = urlparse(url).netloc.lower()
+            
+            # Check for suspicious TLDs
+            if any(domain.endswith(tld) for tld in self.suspicious_tlds):
+                return True
+            
+            # Check for typosquatting of trusted domains
+            for trusted_domain in self.trusted_domains:
+                if trusted_domain != domain:
+                    ratio = SequenceMatcher(None, domain, trusted_domain).ratio()
+                    if ratio > 0.8:  # Domain looks similar but isn't exact
+                        return True
+            
+            return False
+        except Exception:
+            return True  # If we can't parse the URL, consider it suspicious
+
+    def _find_similar_domain(self, url: str) -> str:
+        """Find similar trusted domain names to detect phishing"""
+        try:
+            domain = urlparse(url).netloc.lower()
+            
+            for trusted_domain, org_name in self.trusted_domains.items():
+                if trusted_domain != domain:
+                    ratio = SequenceMatcher(None, domain, trusted_domain).ratio()
+                    if ratio > 0.8:  # Domain looks similar but isn't exact
+                        return f"{org_name} ({trusted_domain})"
+            
+            return ""
+        except Exception:
+            return ""
