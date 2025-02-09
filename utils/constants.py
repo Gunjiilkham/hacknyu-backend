@@ -26,8 +26,20 @@ SUSPICIOUS_FUNCTIONS: Set[str] = {
     'subprocess.Popen', 'requests.get', 'urllib.request.urlopen'
 }
 
-KNOWN_APIS: Dict[str, List[str]] = {
-    "google": ["googleapis.com", "google.com"],
-    "github": ["api.github.com", "github.com"],
-    "aws": ["amazonaws.com"]
+KNOWN_APIS = {
+    "Google": [
+        "api.google.com",
+        "googleapis.com"
+    ],
+    "GitHub": [
+        "api.github.com"
+    ],
+    "AWS": [
+        "api.aws.amazon.com",
+        "amazonaws.com"
+    ],
+    "Azure": [
+        "api.azure.com",
+        "azure-api.net"
+    ]
 } 

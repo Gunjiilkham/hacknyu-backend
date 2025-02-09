@@ -1,6 +1,6 @@
 from enum import Enum
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Dict, Optional
 
 class RiskLevel(str, Enum):
     SAFE = "safe"
@@ -17,8 +17,12 @@ class SecurityRating(BaseModel):
 class SecurityScanResult(BaseModel):
     is_suspicious: bool
     risk_level: RiskLevel
+    rating: SecurityRating
     warnings: List[str]
-    details: Dict = {}  # Provide default empty dict
+    details: Dict[str, str]
+
+    class Config:
+        populate_by_name = True
 
     # SSL helps ensure:
     # 1. Package data is authentic

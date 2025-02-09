@@ -1,5 +1,25 @@
-from typing import List, Dict
-from schemas.security import SecurityScanResult, RiskLevel
+from enum import Enum
+from pydantic import BaseModel
+from typing import List, Dict, Optional
+
+class RiskLevel(str, Enum):
+    SAFE = "safe"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+class SecurityRating(BaseModel):
+    score: int
+    risk_level: RiskLevel
+    confidence: int
+
+class SecurityScanResult(BaseModel):
+    is_suspicious: bool
+    risk_level: RiskLevel
+    rating: SecurityRating
+    warnings: List[str]
+    details: Dict[str, str]
 
 class KeywordScanner:
     def __init__(self):
@@ -83,41 +103,27 @@ class KeywordScanner:
         ]
 
     async def scan_text(self, text: str) -> SecurityScanResult:
-        # If it's documentation, return safe immediately
-        text_lower = text.lower()
-        if any(context in text_lower for context in self.safe_contexts):
-            return SecurityScanResult(
-                is_suspicious=False,
-                risk_level=RiskLevel.SAFE,
-                warnings=[],
-                details={'context': 'documentation'}
-            )
+        warnings = []
+        risk_level = RiskLevel.LOW
         
-        found_keywords = []
-        highest_risk = RiskLevel.SAFE
-
-        # Convert text to lowercase for case-insensitive matching
-        text_lower = text.lower()
+        for keyword, risk in self.suspicious_keywords.items():
+            if keyword in text.lower():
+                warnings.append(f"Found sensitive keyword: {keyword}")
+                if risk.value > risk_level.value:
+                    risk_level = risk
         
-        for keyword, risk_level in self.suspicious_keywords.items():
-            if keyword in text_lower:
-                found_keywords.append({
-                    'keyword': keyword,
-                    'risk_level': risk_level,
-                    'context': self._get_context(text, keyword)
-                })
-                # Update highest risk level found
-                if risk_level.value > highest_risk.value:
-                    highest_risk = risk_level
-
         return SecurityScanResult(
-            is_suspicious=len(found_keywords) > 0,
-            risk_level=highest_risk,
-            warnings=[f"Found sensitive keyword: {k['keyword']} ({k['risk_level']})" 
-                     for k in found_keywords],
+            is_suspicious=len(warnings) > 0,
+            risk_level=risk_level,
+            rating=SecurityRating(
+                score=70 if warnings else 100,
+                risk_level=risk_level,
+                confidence=90
+            ),
+            warnings=warnings,
             details={
-                'keywords': found_keywords,
-                'text_length': len(text)
+                "text_length": str(len(text)),
+                "found_keywords": ", ".join(warnings)
             }
         )
 
