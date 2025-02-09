@@ -12,15 +12,73 @@ class CodeScanner:
     def __init__(self):
         self.suspicious_functions = SUSPICIOUS_FUNCTIONS
         self.trusted_domains = {
-            "python.org": "Python",
-            "pypi.org": "PyPI",
-            "npmjs.com": "npm",
-            "github.com": "GitHub"
+            "python.org": "Python Official",
+            "pypi.org": "PyPI Official",
+            "npmjs.com": "npm Official",
+            "github.com": "GitHub",
+            "aws.amazon.com": "AWS Official",
+            "amazonaws.com": "AWS Services",
+            "awsstatic.com": "AWS Static Content",
+            "amazon.com": "Amazon",
+            "docs.python.org": "Python Docs",
+            "packaging.python.org": "Python Packaging",
+            "azure.microsoft.com": "Azure Official",
+            "cloudflare.com": "Cloudflare",
+            "gitlab.com": "GitLab",
+            "bitbucket.org": "Bitbucket",
+            "developer.mozilla.org": "MDN Web Docs",
+            "learn.microsoft.com": "Microsoft Docs",
+            "docs.github.com": "GitHub Docs",
+            "stackoverflow.com": "Stack Overflow",
+            "reactjs.org": "React Docs",
+            "vuejs.org": "Vue.js Docs",
+            "cdn.jsdelivr.net": "jsDelivr CDN",
+            "unpkg.com": "UNPKG CDN",
+            "cdnjs.cloudflare.com": "Cloudflare CDN",
+            "googleapis.com": "Google APIs",
+            "gstatic.com": "Google Static"
         }
         self.suspicious_tlds = ['.xyz', '.tk', '.pw', '.cc', '.su']
 
+        # Define safe code patterns
+        self.safe_code_patterns = {
+            # Common CDN and framework imports
+            'react.js': 'React Framework',
+            'vue.js': 'Vue Framework',
+            'angular.js': 'Angular Framework',
+            'jquery.min.js': 'jQuery Library',
+            'bootstrap.min.js': 'Bootstrap Framework',
+            'analytics.js': 'Analytics Script',
+            'gtag.js': 'Google Analytics',
+            'ga.js': 'Google Analytics',
+            'fbevents.js': 'Facebook Pixel',
+            'pixel.js': 'Marketing Pixel',
+        }
+
+        # Common legitimate script patterns
+        self.common_scripts = {
+            'GoogleAnalytics': True,
+            'gtag': True,
+            'fbq': True,
+            'dataLayer': True,
+            'addEventListener': True,
+            'querySelector': True,
+            'getElementById': True,
+        }
+
+        # AI/Code Generation Sites (Medium Trust)
+        self.ai_domains = {
+            "v0.dev": "Vercel AI",
+            "deepseek.com": "Deepseek",
+            "chat.openai.com": "ChatGPT",
+            "bard.google.com": "Google Bard",
+            "copilot.github.com": "GitHub Copilot",
+            "replit.com": "Replit",
+            "colab.google.com": "Google Colab"
+        }
+
     async def analyze_code(self, code: str) -> SecurityScanResult:
-        if not code.strip():  # Add validation for empty code
+        if not code.strip():
             return SecurityScanResult(
                 is_suspicious=False,
                 risk_level=RiskLevel.SAFE,
@@ -28,31 +86,120 @@ class CodeScanner:
                 details={"code_length": 0}
             )
 
+        # Skip analysis for known safe scripts
+        if self._is_safe_script(code):
+            return SecurityScanResult(
+                is_suspicious=False,
+                risk_level=RiskLevel.SAFE,
+                warnings=[],
+                details={
+                    "code_length": len(code),
+                    "code_type": "safe_script"
+                }
+            )
+
         warnings = []
         risk_level = RiskLevel.LOW
 
-        try:
-            tree = ast.parse(code)
-            warnings.extend(self._check_dangerous_functions(tree))
-            warnings.extend(self._check_suspicious_imports(tree))
-            warnings.extend(self._check_network_access(tree))
-            
-            if warnings:
-                risk_level = RiskLevel.HIGH if any("critical" in w.lower() for w in warnings) else RiskLevel.MEDIUM
+        # Only analyze if it looks like actual code
+        if self._looks_like_code(code):
+            try:
+                if self._is_javascript(code):
+                    js_warnings = self._check_javascript(code)
+                    if js_warnings:
+                        warnings.extend(js_warnings)
+                        risk_level = RiskLevel.MEDIUM
+                else:
+                    # Python analysis
+                    tree = ast.parse(code)
+                    python_warnings = self._check_python_code(tree)
+                    if python_warnings:
+                        warnings.extend(python_warnings)
+                        risk_level = RiskLevel.MEDIUM
 
-        except SyntaxError:
-            warnings.append("Code contains syntax errors - could be obfuscated")
-            risk_level = RiskLevel.HIGH
-        except Exception as e:
-            warnings.append(f"Error analyzing code: {str(e)}")
-            risk_level = RiskLevel.MEDIUM
+            except Exception:
+                # Don't warn about syntax for non-code content
+                pass
 
         return SecurityScanResult(
             is_suspicious=len(warnings) > 0,
             risk_level=risk_level,
             warnings=warnings,
-            details={"code_length": len(code)}
+            details={
+                "code_length": len(code),
+                "code_type": self._determine_code_type(code)
+            }
         )
+
+    def _looks_like_code(self, content: str) -> bool:
+        """Check if content looks like actual code"""
+        code_indicators = [
+            'function', 'var ', 'let ', 'const ',
+            'class ', 'import ', 'export ',
+            'def ', 'class:', 'import ',
+            'return ', 'async ', 'await '
+        ]
+        return any(indicator in content for indicator in code_indicators)
+
+    def _is_javascript(self, code: str) -> bool:
+        """Check if code is JavaScript"""
+        js_indicators = [
+            'function', 'var ', 'let ', 'const ',
+            'document.', 'window.', 'addEventListener',
+            'querySelector', 'getElementById'
+        ]
+        return any(indicator in code for indicator in js_indicators)
+
+    def _is_safe_script(self, code: str) -> bool:
+        """Check if this is a known safe script"""
+        code_lower = code.lower()
+        # Check for common CDN scripts
+        for safe_pattern in self.safe_code_patterns:
+            if safe_pattern.lower() in code_lower:
+                return True
+        # Check for common legitimate script patterns
+        return any(pattern in code for pattern in self.common_scripts)
+
+    def _determine_code_type(self, code: str) -> str:
+        """Determine the type of code more accurately"""
+        if self._is_javascript(code):
+            if any(cdn in code.lower() for cdn in self.safe_code_patterns):
+                return "cdn_script"
+            if any(pattern in code for pattern in self.common_scripts):
+                return "analytics_script"
+            return "javascript"
+        return "unknown"
+
+    def _check_javascript(self, code: str) -> List[str]:
+        """Check JavaScript-specific security issues"""
+        warnings = []
+        dangerous_patterns = {
+            'eval(': '⚠️ Dangerous: Dynamic code execution',
+            'new Function(': '⚠️ Dangerous: Dynamic code execution',
+            'document.write(': '⚠️ Dangerous: Direct DOM manipulation',
+            '.innerHTML =': '⚠️ Potential XSS risk',
+            'window.location =': '⚠️ Suspicious: URL redirection',
+        }
+        
+        # Only warn if pattern is not in a comment or string
+        for pattern, warning in dangerous_patterns.items():
+            if pattern in code and not self._is_in_comment_or_string(code, pattern):
+                warnings.append(warning)
+        
+        return warnings
+
+    def _is_in_comment_or_string(self, code: str, pattern: str) -> bool:
+        """Check if pattern is in a comment or string"""
+        lines = code.split('\n')
+        for line in lines:
+            if pattern in line:
+                # Skip if in comment
+                if '//' in line[:line.find(pattern)]:
+                    return True
+                # Skip if in string (basic check)
+                if line.count('"') % 2 == 0 or line.count("'") % 2 == 0:
+                    return True
+        return False
 
     def _check_dangerous_functions(self, tree: ast.AST) -> List[str]:
         warnings = []
@@ -110,8 +257,13 @@ class CodeScanner:
         warnings = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Str):
-                if node.s.startswith(('http://', 'https://', 'ftp://')):
-                    warnings.append(f"Network access detected: {node.s}")
+                url = node.s
+                if url.startswith(('http://', 'https://')):
+                    # Skip warning if domain is trusted
+                    domain = urlparse(url).netloc.lower()
+                    if any(trusted in domain for trusted in self.trusted_domains.keys()):
+                        continue
+                    warnings.append(f"Network access detected: {url}")
         return warnings 
 
     async def scan_webpage(self, url: str) -> SecurityScanResult:
@@ -129,22 +281,6 @@ class CodeScanner:
                                 risk_level=RiskLevel.HIGH,
                                 warnings=[f"⚠️ URL not found: {url}"],
                                 details={"url": url}
-                            )
-
-                        # Check domain before fetching content
-                        if self._is_suspicious_domain(url):
-                            return SecurityScanResult(
-                                is_suspicious=True,
-                                risk_level=RiskLevel.HIGH,
-                                warnings=[
-                                    f"⚠️ Suspicious domain detected",
-                                    "This might be a phishing attempt"
-                                ],
-                                details={
-                                    "url": url,
-                                    "type": "phishing",
-                                    "similar_to": self._find_similar_domain(url)
-                                }
                             )
 
                     html = await response.text()
@@ -229,6 +365,14 @@ class CodeScanner:
         try:
             domain = urlparse(url).netloc.lower()
             
+            # If it's a trusted domain, return False
+            if any(trusted in domain for trusted in self.trusted_domains.keys()):
+                return False
+                
+            # If it's an AI site, return False (not suspicious, just needs caution)
+            if any(ai_domain in domain for ai_domain in self.ai_domains.keys()):
+                return False
+
             # Check for suspicious TLDs
             if any(domain.endswith(tld) for tld in self.suspicious_tlds):
                 return True
