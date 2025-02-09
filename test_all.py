@@ -67,5 +67,25 @@ async def test_all():
             except Exception as e:
                 print(f"Error scanning URL {url}: {str(e)}")
 
+        print("\n4. Testing Keyword Scanner...")
+        test_texts = [
+            "This is a normal text",
+            "The password is 12345",
+            "API_KEY=abc123 SECRET_KEY=xyz789",
+            "Please enter your credit card number"
+        ]
+
+        for text in test_texts:
+            try:
+                async with session.post(
+                    'http://localhost:8000/api/v1/scan-keywords',
+                    json={"text": text}
+                ) as response:
+                    result = await response.json()
+                    print(f"\nText: {text}")
+                    print(f"Result: {result}")
+            except Exception as e:
+                print(f"Error scanning text: {str(e)}")
+
 if __name__ == "__main__":
     asyncio.run(test_all()) 
