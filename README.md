@@ -54,3 +54,5 @@ uvicorn main:app --reload --port 8001
 2. API documentation available at:
    - Swagger UI: http://localhost:8001/docs
    - ReDoc: http://localhost:8001/redoc
+  
+https://youtu.be/krJquvXj3w8
